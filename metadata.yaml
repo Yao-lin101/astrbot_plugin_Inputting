@@ -3,4 +3,4 @@ display_name: 消息输入合并
 desc: 消息自动合并插件：当用户正在输入或连续发送短句时进行拦截与打包，解决 LLM 响应碎片化问题。
 version: v1.0.9
 author: e.e.
-repo: https://github.com/enkidu/astrbot_plugin_inputting
+repo: https://github.com/Yao-lin101/astrbot_plugin_Inputting
