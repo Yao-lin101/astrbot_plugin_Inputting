@@ -1,0 +1,14 @@
+{
+    "bundle_threshold": {
+        "description": "合并延迟阈值 (秒)",
+        "type": "float",
+        "default": 1.5,
+        "hint": "等待用户停止输入的时间。如果在该时间内没有新消息或输入状态，则进行合并分发。"
+    },
+    "max_wait": {
+        "description": "最大等待时间 (秒)",
+        "type": "float",
+        "default": 20.0,
+        "hint": "强制合并的最长等待时间，防止用户一直输入导致机器人永远不回复。"
+    }
+}
