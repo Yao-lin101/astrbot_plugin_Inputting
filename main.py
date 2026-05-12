@@ -5,7 +5,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Plain
 
-@register("astrbot_plugin_inputting", "e.e.", "消息自动合并插件：当用户正在输入或连续发送短句时进行拦截与打包，解决 LLM 响应碎片化问题。", "1.0.7")
+@register("astrbot_plugin_inputting", "e.e.", "消息自动合并插件：当用户正在输入或连续发送短句时进行拦截与打包，解决 LLM 响应碎片化问题。", "1.0.8")
 class InputtingPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
@@ -25,14 +25,18 @@ class InputtingPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_all_message(self, event: AstrMessageEvent):
-        # 检查是否已经打包过，防止循环处理
+        # 1. 检查是否已经打包过，防止循环处理
         if event.get_extra("bundled"):
+            return
+        
+        # 2. 排除群聊消息。群聊通常不发送“正在输入”状态，且多人混杂时不适合做全局拦截。
+        if event.message_obj.group_id:
             return
 
         session_key = event.unified_msg_origin
         chain = event.get_messages()
         
-        # 检查是否为空消息（正在输入状态）
+        # 3. 检查是否为空消息（正在输入状态）
         is_empty = not chain or (len(chain) == 1 and isinstance(chain[0], Plain) and not chain[0].text.strip())
         
         if is_empty:
@@ -41,7 +45,7 @@ class InputtingPlugin(Star):
                 self._intercept_event(event)
             return
 
-        # 处理正常文本消息
+        # 4. 处理正常文本消息
         if session_key not in self.buffers:
             self.buffers[session_key] = {
                 "chain": [],
@@ -62,6 +66,7 @@ class InputtingPlugin(Star):
         if getattr(event, "is_at_or_wake_command", False):
             buffer["is_at_or_wake"] = True
             
+        # 拦截当前碎片消息
         self._intercept_event(event)
         self._reset_timer(session_key)
 
@@ -124,7 +129,6 @@ class InputtingPlugin(Star):
         event.set_extra("bundled", True)
         
         # 关键修复：清除之前拦截时 RespondStage 设置的 _streaming_finished 标记。
-        # 如果不清除，重发后的事件在获得 LLM 响应后，RespondStage 会因为看到此标记而直接 return，导致消息发不出来。
         event.set_extra("_streaming_finished", False)
         
         event.continue_event()
