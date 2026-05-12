@@ -5,7 +5,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Plain
 
-@register("astrbot_plugin_inputting", "e.e.", "消息自动合并插件：当用户正在输入或连续发送短句时进行拦截与打包，解决 LLM 响应碎片化问题。", "1.0.6")
+@register("astrbot_plugin_inputting", "e.e.", "消息自动合并插件：当用户正在输入或连续发送短句时进行拦截与打包，解决 LLM 响应碎片化问题。", "1.0.7")
 class InputtingPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
@@ -25,7 +25,7 @@ class InputtingPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_all_message(self, event: AstrMessageEvent):
-        # 1. 检查是否已经打包过，防止循环处理
+        # 检查是否已经打包过，防止循环处理
         if event.get_extra("bundled"):
             return
 
@@ -35,14 +35,13 @@ class InputtingPlugin(Star):
         # 检查是否为空消息（正在输入状态）
         is_empty = not chain or (len(chain) == 1 and isinstance(chain[0], Plain) and not chain[0].text.strip())
         
-        # 2. 处理“正在输入”或空消息
         if is_empty:
             if session_key in self.buffers:
                 self._reset_timer(session_key)
                 self._intercept_event(event)
             return
 
-        # 3. 处理正常文本消息
+        # 处理正常文本消息
         if session_key not in self.buffers:
             self.buffers[session_key] = {
                 "chain": [],
@@ -63,21 +62,15 @@ class InputtingPlugin(Star):
         if getattr(event, "is_at_or_wake_command", False):
             buffer["is_at_or_wake"] = True
             
-        # 拦截当前碎片消息
         self._intercept_event(event)
-        
         self._reset_timer(session_key)
 
     def _intercept_event(self, event: AstrMessageEvent):
         """
-        拦截事件并防止触发后续阶段（包括 LLM 和 RespondStage 的日志）。
+        拦截事件并防止触发后续阶段。
+        使用 STREAMING_FINISH 类型结果来让 RespondStage 静默返回。
         """
         event.stop_event()
-        # 关键点：不能调用 event.clear_result()。
-        # 如果 result 为 None，核心的 ProcessStage 会认为没有任何插件处理该事件，
-        # 从而对于唤醒词开头的消息会跌入 LLM 逻辑。
-        # 相反，我们保留结果对象，但将其内容类型设置为 STREAMING_FINISH，
-        # 这样 RespondStage 会看到该类型并静默返回，不打印发送日志。
         if (res := event.get_result()):
             res.set_result_content_type(ResultContentType.STREAMING_FINISH)
 
@@ -88,7 +81,6 @@ class InputtingPlugin(Star):
         if buffer["timer"]:
             buffer["timer"].cancel()
         
-        # 重新读取配置
         self.bundle_threshold = self.config.get("bundle_threshold", self.bundle_threshold)
         self.max_wait = self.config.get("max_wait", self.max_wait)
         
@@ -128,8 +120,13 @@ class InputtingPlugin(Star):
         if buffer["is_at_or_wake"]:
             event.is_at_or_wake_command = True
         
+        # 准备重新分发事件
         event.set_extra("bundled", True)
-        # 清除拦截时设置的特殊状态，恢复为正常事件
+        
+        # 关键修复：清除之前拦截时 RespondStage 设置的 _streaming_finished 标记。
+        # 如果不清除，重发后的事件在获得 LLM 响应后，RespondStage 会因为看到此标记而直接 return，导致消息发不出来。
+        event.set_extra("_streaming_finished", False)
+        
         event.continue_event()
         event.clear_result()
         
