@@ -5,7 +5,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Plain
 
-@register("astrbot_plugin_inputting", "e.e.", "消息自动合并插件：当用户正在输入或连续发送短句时进行拦截与打包，解决 LLM 响应碎片化问题。", "1.0.4")
+@register("astrbot_plugin_inputting", "e.e.", "消息自动合并插件：当用户正在输入或连续发送短句时进行拦截与打包，解决 LLM 响应碎片化问题。", "1.0.5")
 class InputtingPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
@@ -14,11 +14,15 @@ class InputtingPlugin(Star):
         self.buffers = {} 
         
     async def initialize(self):
-        # 注意：这里的 self.config 是 StarManager 在实例化时传入的该插件专属配置。
-        # 之前错误地使用了 self.context.get_config()，导致读取到了全局配置中的默认值。
+        # 显式读取配置，并在启动时打印详细日志
         self.bundle_threshold = self.config.get("bundle_threshold", 1.5)
         self.max_wait = self.config.get("max_wait", 20.0)
-        logger.info(f"InputtingPlugin 已启动。当前配置：合并阈值 {self.bundle_threshold}s，最大等待 {self.max_wait}s")
+        
+        logger.info("="*30)
+        logger.info("InputtingPlugin (消息合并) 已启动")
+        logger.info(f" - 当前合并阈值 (bundle_threshold): {self.bundle_threshold}s")
+        logger.info(f" - 当前最大等待时间 (max_wait): {self.max_wait}s")
+        logger.info("="*30)
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_all_message(self, event: AstrMessageEvent):
@@ -71,7 +75,7 @@ class InputtingPlugin(Star):
         if buffer["timer"]:
             buffer["timer"].cancel()
         
-        # 重新读取一次配置，以支持在不重启的情况下响应配置变更（如果 config 对象是动态更新的）
+        # 重新读取一次配置，以支持在不重启的情况下响应配置变更
         self.bundle_threshold = self.config.get("bundle_threshold", self.bundle_threshold)
         self.max_wait = self.config.get("max_wait", self.max_wait)
         
