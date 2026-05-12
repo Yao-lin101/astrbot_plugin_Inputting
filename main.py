@@ -1,11 +1,11 @@
 import asyncio
 import time
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult, ResultContentType
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Plain
 
-@register("astrbot_plugin_inputting", "e.e.", "消息自动合并插件：当用户正在输入或连续发送短句时进行拦截与打包，解决 LLM 响应碎片化问题。", "1.0.5")
+@register("astrbot_plugin_inputting", "e.e.", "消息自动合并插件：当用户正在输入或连续发送短句时进行拦截与打包，解决 LLM 响应碎片化问题。", "1.0.6")
 class InputtingPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
@@ -14,7 +14,6 @@ class InputtingPlugin(Star):
         self.buffers = {} 
         
     async def initialize(self):
-        # 显式读取配置，并在启动时打印详细日志
         self.bundle_threshold = self.config.get("bundle_threshold", 1.5)
         self.max_wait = self.config.get("max_wait", 20.0)
         
@@ -26,6 +25,7 @@ class InputtingPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_all_message(self, event: AstrMessageEvent):
+        # 1. 检查是否已经打包过，防止循环处理
         if event.get_extra("bundled"):
             return
 
@@ -35,14 +35,14 @@ class InputtingPlugin(Star):
         # 检查是否为空消息（正在输入状态）
         is_empty = not chain or (len(chain) == 1 and isinstance(chain[0], Plain) and not chain[0].text.strip())
         
+        # 2. 处理“正在输入”或空消息
         if is_empty:
             if session_key in self.buffers:
                 self._reset_timer(session_key)
-                event.stop_event()
-                event.clear_result()
+                self._intercept_event(event)
             return
 
-        # 处理正常消息
+        # 3. 处理正常文本消息
         if session_key not in self.buffers:
             self.buffers[session_key] = {
                 "chain": [],
@@ -63,10 +63,23 @@ class InputtingPlugin(Star):
         if getattr(event, "is_at_or_wake_command", False):
             buffer["is_at_or_wake"] = True
             
-        event.stop_event()
-        event.clear_result()
+        # 拦截当前碎片消息
+        self._intercept_event(event)
         
         self._reset_timer(session_key)
+
+    def _intercept_event(self, event: AstrMessageEvent):
+        """
+        拦截事件并防止触发后续阶段（包括 LLM 和 RespondStage 的日志）。
+        """
+        event.stop_event()
+        # 关键点：不能调用 event.clear_result()。
+        # 如果 result 为 None，核心的 ProcessStage 会认为没有任何插件处理该事件，
+        # 从而对于唤醒词开头的消息会跌入 LLM 逻辑。
+        # 相反，我们保留结果对象，但将其内容类型设置为 STREAMING_FINISH，
+        # 这样 RespondStage 会看到该类型并静默返回，不打印发送日志。
+        if (res := event.get_result()):
+            res.set_result_content_type(ResultContentType.STREAMING_FINISH)
 
     def _reset_timer(self, session_key):
         buffer = self.buffers.get(session_key)
@@ -75,7 +88,7 @@ class InputtingPlugin(Star):
         if buffer["timer"]:
             buffer["timer"].cancel()
         
-        # 重新读取一次配置，以支持在不重启的情况下响应配置变更
+        # 重新读取配置
         self.bundle_threshold = self.config.get("bundle_threshold", self.bundle_threshold)
         self.max_wait = self.config.get("max_wait", self.max_wait)
         
@@ -116,6 +129,7 @@ class InputtingPlugin(Star):
             event.is_at_or_wake_command = True
         
         event.set_extra("bundled", True)
+        # 清除拦截时设置的特殊状态，恢复为正常事件
         event.continue_event()
         event.clear_result()
         
