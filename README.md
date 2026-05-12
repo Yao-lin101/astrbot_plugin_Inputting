@@ -1,14 +1,43 @@
-# astrbot-plugin-helloworld
+# AstrBot 消息输入合并插件 (Inputting)
 
-AstrBot 插件模板 / A template plugin for AstrBot plugin feature
+该插件专为解决即时通讯软件（如 QQ）中用户“打一段发一段”的习惯导致的 LLM 响应碎片化问题。它能智能拦截碎片消息和“正在输入”状态，并在用户停止输入后将其打包成一条完整的消息发送给 LLM。
 
-> [!NOTE]
-> This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.
-> 
-> [AstrBot](https://github.com/AstrBotDevs/AstrBot) is an agentic assistant for both personal and group conversations. It can be deployed across dozens of mainstream instant messaging platforms, including QQ, Telegram, Feishu, DingTalk, Slack, LINE, Discord, Matrix, etc. In addition, it provides a reliable and extensible conversational AI infrastructure for individuals, developers, and teams. Whether you need a personal AI companion, an intelligent customer support agent, an automation assistant, or an enterprise knowledge base, AstrBot enables you to quickly build AI applications directly within your existing messaging workflows.
+## ✨ 功能特性
 
-# Supports
+- **智能去碎片化**：自动拦截连续发送的短句，合并为单一长句，避免 LLM 对每一小句话都进行重复响应。
+- **状态感知**：深度集成平台的“正在输入”状态（Empty Message），只要用户还在输入，打包计时器就会自动重置。
+- **高优先级拦截**：内置 `priority=100`，确保在其他插件处理前先行拦截，防止数据库中出现冗余的碎片记录。
+- **唤醒词支持**：支持唤醒词触发的消息，即使是分段发送也能正确合并并触发。
+- **多用户隔离**：每个用户（私聊）拥有独立的缓冲区，互不干扰。
+- **智能排除**：默认排除群聊消息，避免干扰群内多人混战的正常沟通节奏。
+- **流式输出兼容**：解决了合并分发后可能导致的流式标记冲突问题。
 
-- [AstrBot Repo](https://github.com/AstrBotDevs/AstrBot)
-- [AstrBot Plugin Development Docs (Chinese)](https://docs.astrbot.app/dev/star/plugin-new.html)
-- [AstrBot Plugin Development Docs (English)](https://docs.astrbot.app/en/dev/star/plugin-new.html)
+## ⚙️ 配置说明
+
+您可以在 `data/config/astrbot_plugin_inputting_config.json` 中调整以下参数：
+
+| 参数 | 默认值 | 说明 |
+| :--- | :--- | :--- |
+| `bundle_threshold` | `1.5` | **合并阈值（秒）**。用户停止发送消息或停止输入超过此时间，则视为输入完成，开始打包分发。 |
+| `max_wait` | `20.0` | **最大等待时间（秒）**。防止用户一直输入导致消息永不分发。达到此时间后将强制分发当前已合并的内容。 |
+
+## 🚀 版本记录
+
+### v1.0.9
+- 引入 `priority` 优先级机制，彻底解决与日报分析插件的顺序冲突问题。
+- 还原目录结构，无需通过重命名文件夹来调整顺序。
+
+### v1.0.8
+- 排除群聊消息，仅在私聊中生效。
+- 确认多用户 session 隔离逻辑。
+
+### v1.0.7
+- 修复 `_streaming_finished` 标记残留导致的 LLM 有响应但发不出来的 Bug。
+
+### v1.0.6
+- 解决 `clear_result()` 导致的唤醒词消息直接跌入核心 LLM 逻辑的问题。
+- 使用 `STREAMING_FINISH` 静默抑制碎片消息的“Prepare to send”日志。
+
+## 🛠️ 开发者说明
+
+该插件通过 Hook `filter.EventMessageType.ALL` 实现。使用了 `event.stop_event()` 配合特殊的 `ResultContentType` 来实现静默拦截，并利用 `context.get_event_queue().put_nowait(event)` 进行二次分发。
