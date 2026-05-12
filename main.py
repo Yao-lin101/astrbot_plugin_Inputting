@@ -5,7 +5,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Plain
 
-@register("astrbot_plugin_inputting", "e.e.", "消息自动合并插件：当用户正在输入或连续发送短句时进行拦截与打包，解决 LLM 响应碎片化问题。", "1.0.8")
+@register("astrbot_plugin_inputting", "e.e.", "消息自动合并插件：当用户正在输入或连续发送短句时进行拦截与打包，解决 LLM 响应碎片化问题。", "1.0.9")
 class InputtingPlugin(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
@@ -23,13 +23,16 @@ class InputtingPlugin(Star):
         logger.info(f" - 当前最大等待时间 (max_wait): {self.max_wait}s")
         logger.info("="*30)
 
-    @filter.event_message_type(filter.EventMessageType.ALL)
+    # 关键：设置 priority=100。
+    # AstrBot 会按 priority 从大到小排序 Handler。
+    # 设置高优先级确保在日报等其他插件之前拦截到碎片消息。
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=100)
     async def on_all_message(self, event: AstrMessageEvent):
         # 1. 检查是否已经打包过，防止循环处理
         if event.get_extra("bundled"):
             return
         
-        # 2. 排除群聊消息。群聊通常不发送“正在输入”状态，且多人混杂时不适合做全局拦截。
+        # 2. 排除群聊消息
         if event.message_obj.group_id:
             return
 
@@ -128,7 +131,7 @@ class InputtingPlugin(Star):
         # 准备重新分发事件
         event.set_extra("bundled", True)
         
-        # 关键修复：清除之前拦截时 RespondStage 设置的 _streaming_finished 标记。
+        # 清除之前拦截时 RespondStage 设置的 _streaming_finished 标记。
         event.set_extra("_streaming_finished", False)
         
         event.continue_event()
